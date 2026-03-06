@@ -1,11 +1,52 @@
 import { Meme } from "../types";
 
-async function fetchJson(url: string): Promise<Record<string, unknown> | null> {
+// Reddit OAuth — app-only auth (no user login needed)
+const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID || "";
+const REDDIT_SECRET = process.env.REDDIT_SECRET || "";
+
+let cachedToken: { token: string; expires: number } | null = null;
+
+async function getRedditToken(): Promise<string | null> {
+  if (cachedToken && Date.now() < cachedToken.expires) {
+    return cachedToken.token;
+  }
+
+  if (!REDDIT_CLIENT_ID || !REDDIT_SECRET) return null;
+
+  try {
+    const res = await fetch("https://www.reddit.com/api/v1/access_token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${btoa(`${REDDIT_CLIENT_ID}:${REDDIT_SECRET}`)}`,
+        "User-Agent": "MemeFinder/1.0",
+      },
+      body: "grant_type=client_credentials",
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    cachedToken = {
+      token: data.access_token,
+      expires: Date.now() + (data.expires_in - 60) * 1000,
+    };
+    return data.access_token;
+  } catch {
+    return null;
+  }
+}
+
+async function redditFetch(path: string): Promise<Record<string, any> | null> {
+  const token = await getRedditToken();
+  if (!token) return null;
+
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; MemeFinder/1.0)" },
+    const res = await fetch(`https://oauth.reddit.com${path}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "User-Agent": "MemeFinder/1.0",
+      },
       signal: controller.signal,
     });
     clearTimeout(timer);
@@ -111,7 +152,6 @@ function parseRedditPost(post: RedditPost): Meme | null {
   const isGallery = d.is_gallery && !!d.media_metadata;
   const isImgur = isImgurUrl(d.url);
 
-  // Must have some visual content
   if (!isVideo && !isDirectImage && !hasPreview && !isGallery && !isImgur)
     return null;
 
@@ -125,7 +165,6 @@ function parseRedditPost(post: RedditPost): Meme | null {
     width = d.media.reddit_video.width;
     height = d.media.reddit_video.height;
   } else if (isGallery && d.media_metadata && d.gallery_data) {
-    // Use first image from gallery
     const firstId = d.gallery_data.items[0]?.media_id;
     const meta = firstId ? d.media_metadata[firstId] : undefined;
     if (meta?.s?.u) {
@@ -138,17 +177,13 @@ function parseRedditPost(post: RedditPost): Meme | null {
       return null;
     }
   } else if (isImgur && !isImageUrl(d.url)) {
-    // Imgur links without extension — try adding .jpg
     url = d.url.replace(/\?.*$/, "") + ".jpg";
   } else if (!isDirectImage && hasPreview) {
-    // Use preview image as the URL (for link posts with preview)
     url = d.preview!.images[0].source.url.replace(/&amp;/g, "&");
   }
 
   if (d.preview?.images?.[0]) {
-    const previewUrl =
-      d.preview.images[0].source.url.replace(/&amp;/g, "&");
-    thumbnail = previewUrl;
+    thumbnail = d.preview.images[0].source.url.replace(/&amp;/g, "&");
   }
 
   return {
@@ -171,47 +206,31 @@ function parseRedditPost(post: RedditPost): Meme | null {
 export async function fetchRedditTrending(
   after?: string
 ): Promise<{ memes: Meme[]; after?: string }> {
-  const allMemes: Meme[] = [];
-  let cursor: string | undefined;
-
-  // Use one combined multi-sub URL for speed
   const multiSub = SUBREDDITS.join("+");
-  const batches = [multiSub];
+  const path = `/r/${multiSub}/hot?limit=100&raw_json=1${after ? `&after=${after}` : ""}`;
 
-  const fetches = batches.map(async (sub) => {
-    const reqUrl = `https://www.reddit.com/r/${sub}/hot.json?limit=100&raw_json=1${after ? `&after=${after}` : ""}`;
-    try {
-      const data = await fetchJson(reqUrl) as Record<string, any>;
-      if (!data?.data?.children) return [];
-      if (!cursor) cursor = data.data.after;
-      return (data.data.children || [])
-        .map(parseRedditPost)
-        .filter((m: Meme | null): m is Meme => m !== null);
-    } catch {
-      return [];
-    }
-  });
+  const data = await redditFetch(path);
+  if (!data?.data?.children) return { memes: [], after: undefined };
 
-  const results = await Promise.all(fetches);
-  results.forEach((memes) => allMemes.push(...memes));
+  const memes = (data.data.children || [])
+    .map(parseRedditPost)
+    .filter((m: Meme | null): m is Meme => m !== null);
 
   // Shuffle to mix subreddits
-  allMemes.sort(() => Math.random() - 0.5);
+  memes.sort(() => Math.random() - 0.5);
 
-  return { memes: allMemes, after: cursor };
+  return { memes, after: data.data.after };
 }
 
 export async function searchReddit(query: string, after?: string): Promise<{ memes: Meme[]; after?: string }> {
-  const reqUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&type=link&sort=relevance&limit=100&raw_json=1${after ? `&after=${after}` : ""}`;
+  const path = `/search?q=${encodeURIComponent(query)}&type=link&sort=relevance&limit=100&raw_json=1${after ? `&after=${after}` : ""}`;
 
-  try {
-    const data = await fetchJson(reqUrl) as Record<string, any>;
-    if (!data?.data?.children) return { memes: [] };
-    const memes = (data.data.children || [])
-      .map(parseRedditPost)
-      .filter((m: Meme | null): m is Meme => m !== null);
-    return { memes, after: data.data.after };
-  } catch {
-    return { memes: [] };
-  }
+  const data = await redditFetch(path);
+  if (!data?.data?.children) return { memes: [] };
+
+  const memes = (data.data.children || [])
+    .map(parseRedditPost)
+    .filter((m: Meme | null): m is Meme => m !== null);
+
+  return { memes, after: data.data.after };
 }

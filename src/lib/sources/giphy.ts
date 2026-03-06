@@ -37,10 +37,26 @@ function parseTenor(result: TenorResult): Meme {
   };
 }
 
+// Curated search terms for banger GIFs instead of Tenor's trash "featured" feed
+const BANGER_QUERIES = [
+  "meme reaction",
+  "iron man suit up",
+  "coding programmer",
+  "monkey typing",
+  "mind blown",
+  "deal with it sunglasses",
+  "this is fine fire",
+  "surprised pikachu",
+  "laughing crying",
+  "evil laugh villain",
+];
+
 export async function fetchGiphyTrending(pos?: string): Promise<{ memes: Meme[]; next?: string }> {
+  // Pick a random banger query instead of using Tenor's "featured" endpoint
+  const query = BANGER_QUERIES[Math.floor(Math.random() * BANGER_QUERIES.length)];
   try {
     const res = await fetch(
-      `https://tenor.googleapis.com/v2/featured?key=${TENOR_KEY}&client_key=${CLIENT_KEY}&limit=30${pos ? `&pos=${pos}` : ""}`,
+      `https://tenor.googleapis.com/v2/search?key=${TENOR_KEY}&client_key=${CLIENT_KEY}&q=${encodeURIComponent(query)}&limit=30${pos ? `&pos=${pos}` : ""}`,
       { cache: "no-store", signal: AbortSignal.timeout(5000) }
     );
     if (!res.ok) return { memes: [] };
