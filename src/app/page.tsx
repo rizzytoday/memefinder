@@ -20,6 +20,7 @@ export default function Home() {
   const [toast, setToast] = useState("");
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const [cursors, setCursors] = useState<{ reddit_after?: string; tenor_pos?: string }>({});
   const abortRef = useRef<AbortController | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -37,6 +38,7 @@ export default function Home() {
     setLoading(true);
     setPage(0);
     setHasMore(true);
+    setCursors({});
 
     const url = activeQuery
       ? `/api/memes/search?q=${encodeURIComponent(activeQuery)}&source=${source}`
@@ -49,7 +51,8 @@ export default function Home() {
           const m = data.memes || [];
           setMemes(m);
           setLoading(false);
-          if (m.length < 20) setHasMore(false);
+          setCursors(data.cursors || {});
+          if (m.length < 10) setHasMore(false);
         }
       })
       .catch((err) => {
@@ -62,35 +65,43 @@ export default function Home() {
     return () => controller.abort();
   }, [source, activeQuery]);
 
-  // Infinite scroll — load more
+  // Infinite scroll — load more with cursors
   const loadMore = useCallback(() => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     const nextPage = page + 1;
 
-    const url = activeQuery
-      ? `/api/memes/search?q=${encodeURIComponent(activeQuery)}&source=${source}&page=${nextPage}`
-      : `/api/memes/trending?source=${source}&page=${nextPage}`;
+    const params = new URLSearchParams({ source, page: String(nextPage) });
+    if (cursors.reddit_after) params.set("reddit_after", cursors.reddit_after);
+    if (cursors.tenor_pos) params.set("tenor_pos", cursors.tenor_pos);
 
-    fetch(url)
+    const base = activeQuery
+      ? `/api/memes/search?q=${encodeURIComponent(activeQuery)}&${params}`
+      : `/api/memes/trending?${params}`;
+
+    fetch(base)
       .then((res) => res.json())
       .then((data) => {
         const newMemes = data.memes || [];
         if (newMemes.length === 0) {
           setHasMore(false);
         } else {
-          // Deduplicate
           setMemes((prev) => {
             const ids = new Set(prev.map((m) => m.id));
             const unique = newMemes.filter((m: Meme) => !ids.has(m.id));
+            if (unique.length === 0) {
+              setHasMore(false);
+              return prev;
+            }
             return [...prev, ...unique];
           });
           setPage(nextPage);
+          setCursors(data.cursors || {});
         }
       })
       .catch(() => setHasMore(false))
       .finally(() => setLoadingMore(false));
-  }, [loadingMore, hasMore, page, activeQuery, source]);
+  }, [loadingMore, hasMore, page, activeQuery, source, cursors]);
 
   // Intersection observer for infinite scroll
   useEffect(() => {

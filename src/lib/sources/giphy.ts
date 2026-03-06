@@ -28,7 +28,7 @@ function parseTenor(result: TenorResult): Meme {
     title: result.content_description || result.title || "GIF",
     url: gif?.url || result.url,
     thumbnail: thumb?.url,
-    source: "giphy", // keeping badge as "giphy" since it's the GIF category
+    source: "giphy",
     sourceUrl: result.itemurl || result.url,
     isVideo: false,
     width: gif?.dims?.[0],
@@ -37,30 +37,30 @@ function parseTenor(result: TenorResult): Meme {
   };
 }
 
-export async function fetchGiphyTrending(): Promise<Meme[]> {
+export async function fetchGiphyTrending(pos?: string): Promise<{ memes: Meme[]; next?: string }> {
   try {
     const res = await fetch(
-      `https://tenor.googleapis.com/v2/featured?key=${TENOR_KEY}&client_key=${CLIENT_KEY}&limit=30`,
+      `https://tenor.googleapis.com/v2/featured?key=${TENOR_KEY}&client_key=${CLIENT_KEY}&limit=30${pos ? `&pos=${pos}` : ""}`,
       { cache: "no-store", signal: AbortSignal.timeout(5000) }
     );
-    if (!res.ok) return [];
+    if (!res.ok) return { memes: [] };
     const data = await res.json();
-    return (data.results || []).map(parseTenor);
+    return { memes: (data.results || []).map(parseTenor), next: data.next };
   } catch {
-    return [];
+    return { memes: [] };
   }
 }
 
-export async function searchGiphy(query: string): Promise<Meme[]> {
+export async function searchGiphy(query: string, pos?: string): Promise<{ memes: Meme[]; next?: string }> {
   try {
     const res = await fetch(
-      `https://tenor.googleapis.com/v2/search?key=${TENOR_KEY}&client_key=${CLIENT_KEY}&q=${encodeURIComponent(query)}&limit=30`,
+      `https://tenor.googleapis.com/v2/search?key=${TENOR_KEY}&client_key=${CLIENT_KEY}&q=${encodeURIComponent(query)}&limit=30${pos ? `&pos=${pos}` : ""}`,
       { cache: "no-store", signal: AbortSignal.timeout(5000) }
     );
-    if (!res.ok) return [];
+    if (!res.ok) return { memes: [] };
     const data = await res.json();
-    return (data.results || []).map(parseTenor);
+    return { memes: (data.results || []).map(parseTenor), next: data.next };
   } catch {
-    return [];
+    return { memes: [] };
   }
 }

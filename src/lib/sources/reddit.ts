@@ -215,16 +215,17 @@ export async function fetchRedditTrending(
   return { memes: allMemes, after: cursor };
 }
 
-export async function searchReddit(query: string): Promise<Meme[]> {
-  const reqUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&type=link&sort=relevance&limit=100&raw_json=1`;
+export async function searchReddit(query: string, after?: string): Promise<{ memes: Meme[]; after?: string }> {
+  const reqUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&type=link&sort=relevance&limit=100&raw_json=1${after ? `&after=${after}` : ""}`;
 
   try {
     const data = await fetchJson(reqUrl) as Record<string, any>;
-    if (!data?.data?.children) return [];
-    return (data.data.children || [])
+    if (!data?.data?.children) return { memes: [] };
+    const memes = (data.data.children || [])
       .map(parseRedditPost)
       .filter((m: Meme | null): m is Meme => m !== null);
+    return { memes, after: data.data.after };
   } catch {
-    return [];
+    return { memes: [] };
   }
 }
