@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Meme } from "@/lib/types";
 import { SearchBar } from "@/components/SearchBar";
 import { MemeCard } from "@/components/MemeCard";
@@ -12,19 +12,31 @@ type Source = "all" | "reddit" | "giphy" | "imgflip";
 export default function Home() {
   const [memes, setMemes] = useState<Meme[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [query, setQuery] = useState("");
   const [activeQuery, setActiveQuery] = useState("");
   const [source, setSource] = useState<Source>("all");
   const [selectedMeme, setSelectedMeme] = useState<Meme | null>(null);
+  const [toast, setToast] = useState("");
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(""), 1500);
+  }, []);
+
+  // Initial fetch
   useEffect(() => {
-    // Abort previous request
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
     setLoading(true);
+    setPage(0);
+    setHasMore(true);
 
     const url = activeQuery
       ? `/api/memes/search?q=${encodeURIComponent(activeQuery)}&source=${source}`
@@ -34,8 +46,10 @@ export default function Home() {
       .then((res) => res.json())
       .then((data) => {
         if (!controller.signal.aborted) {
-          setMemes(data.memes || []);
+          const m = data.memes || [];
+          setMemes(m);
           setLoading(false);
+          if (m.length < 20) setHasMore(false);
         }
       })
       .catch((err) => {
@@ -48,8 +62,91 @@ export default function Home() {
     return () => controller.abort();
   }, [source, activeQuery]);
 
+  // Infinite scroll — load more
+  const loadMore = useCallback(() => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    const nextPage = page + 1;
+
+    const url = activeQuery
+      ? `/api/memes/search?q=${encodeURIComponent(activeQuery)}&source=${source}&page=${nextPage}`
+      : `/api/memes/trending?source=${source}&page=${nextPage}`;
+
+    fetch(url)
+      .then((res) => res.json())
+      .then((data) => {
+        const newMemes = data.memes || [];
+        if (newMemes.length === 0) {
+          setHasMore(false);
+        } else {
+          // Deduplicate
+          setMemes((prev) => {
+            const ids = new Set(prev.map((m) => m.id));
+            const unique = newMemes.filter((m: Meme) => !ids.has(m.id));
+            return [...prev, ...unique];
+          });
+          setPage(nextPage);
+        }
+      })
+      .catch(() => setHasMore(false))
+      .finally(() => setLoadingMore(false));
+  }, [loadingMore, hasMore, page, activeQuery, source]);
+
+  // Intersection observer for infinite scroll
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loading) {
+          loadMore();
+        }
+      },
+      { rootMargin: "400px" }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMore, loading]);
+
   const handleSearch = () => {
     setActiveQuery(query.trim());
+  };
+
+  const handleCopyImage = async (meme: Meme) => {
+    try {
+      const res = await fetch(meme.url);
+      const blob = await res.blob();
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type]: blob }),
+      ]);
+      showToast("Image copied to clipboard");
+    } catch {
+      // Fallback: copy URL
+      await navigator.clipboard.writeText(meme.url);
+      showToast("URL copied (image copy not supported)");
+    }
+  };
+
+  const handleDownload = async (meme: Meme) => {
+    try {
+      const res = await fetch(meme.url);
+      const blob = await res.blob();
+      const ext = meme.isVideo ? "mp4" : meme.url.includes(".gif") ? "gif" : "jpg";
+      const filename = `${meme.title.slice(0, 40).replace(/[^a-zA-Z0-9]/g, "_")}.${ext}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("Downloading...");
+    } catch {
+      window.open(meme.url, "_blank");
+    }
   };
 
   return (
@@ -61,6 +158,12 @@ export default function Home() {
           display: "flex",
           flexDirection: "column",
           gap: 20,
+          position: "sticky",
+          top: 0,
+          zIndex: 50,
+          background: "var(--bg-primary)",
+          borderBottom: "1px solid var(--border-subtle)",
+          marginBottom: 20,
         }}
       >
         <div
@@ -73,16 +176,34 @@ export default function Home() {
           }}
         >
           <div>
-            <h1
-              style={{
-                fontSize: 28,
-                fontWeight: 800,
-                letterSpacing: "-0.03em",
-                margin: 0,
-              }}
-            >
-              memefinder
-            </h1>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <h1
+                style={{
+                  fontSize: 28,
+                  fontWeight: 800,
+                  letterSpacing: "-0.03em",
+                  margin: 0,
+                }}
+              >
+                memefinder
+              </h1>
+              <a
+                href="https://x.com/rizzytoday"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                  textDecoration: "none",
+                  fontWeight: 500,
+                  transition: "color 0.2s ease",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
+                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-secondary)")}
+              >
+                by @rizzy
+              </a>
+            </div>
             <p
               style={{
                 fontSize: 13,
@@ -105,26 +226,6 @@ export default function Home() {
             >
               {memes.length} memes
             </span>
-            <button
-              onClick={() => {
-                // Force re-fetch by toggling a dummy state
-                setActiveQuery((prev) => prev + " ");
-                setTimeout(() => setActiveQuery((prev) => prev.trim()), 0);
-              }}
-              style={{
-                background: "rgba(255,255,255,0.08)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: 8,
-                padding: "6px 12px",
-                cursor: "pointer",
-                color: "var(--text-primary)",
-                fontSize: 12,
-                fontWeight: 600,
-                transition: "all 0.2s ease",
-              }}
-            >
-              Refresh
-            </button>
           </div>
         </div>
 
@@ -160,6 +261,9 @@ export default function Home() {
               "elon musk",
               "reaction memes",
               "marvel memes",
+              "ape with ak47",
+              "office memes",
+              "anime memes",
             ].map((suggestion) => (
               <button
                 key={suggestion}
@@ -243,15 +347,36 @@ export default function Home() {
           <p style={{ fontSize: 13 }}>Try a different search or source</p>
         </div>
       ) : (
-        <div className="meme-grid">
-          {memes.map((meme) => (
-            <MemeCard
-              key={meme.id}
-              meme={meme}
-              onClick={() => setSelectedMeme(meme)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="meme-grid">
+            {memes.map((meme) => (
+              <MemeCard
+                key={meme.id}
+                meme={meme}
+                onClick={() => setSelectedMeme(meme)}
+                onCopy={() => handleCopyImage(meme)}
+                onDownload={() => handleDownload(meme)}
+              />
+            ))}
+          </div>
+
+          {/* Infinite scroll sentinel */}
+          <div
+            ref={sentinelRef}
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              padding: "40px 0",
+            }}
+          >
+            {loadingMore && <div className="spinner" />}
+            {!hasMore && memes.length > 0 && (
+              <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+                That's all the memes for now
+              </span>
+            )}
+          </div>
+        </>
       )}
 
       {/* Lightbox */}
@@ -259,7 +384,31 @@ export default function Home() {
         <Lightbox
           meme={selectedMeme}
           onClose={() => setSelectedMeme(null)}
+          onCopy={() => handleCopyImage(selectedMeme)}
+          onDownload={() => handleDownload(selectedMeme)}
         />
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "var(--green)",
+            color: "black",
+            padding: "8px 16px",
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            zIndex: 200,
+            animation: "fadeIn 0.15s ease",
+          }}
+        >
+          {toast}
+        </div>
       )}
     </div>
   );

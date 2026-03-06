@@ -210,6 +210,53 @@ body {
   to { opacity: 1; }
 }
 
+/* Card action buttons */
+.card-action-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.card-action-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
+}
+.card-action-btn:active {
+  transform: scale(0.95);
+}
+
+/* Lightbox buttons */
+.lightbox-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s ease;
+}
+.lightbox-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.lightbox-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.lightbox-btn-primary:hover {
+  background: #6d28d9;
+}
+
 /* Spinner */
 .spinner {
   width: 24px;
