@@ -89,12 +89,11 @@ export async function fetchRedditTrending(
 }
 
 export async function searchReddit(query: string, _after?: string): Promise<{ memes: Meme[]; after?: string }> {
-  // meme-api.com doesn't support search, so fetch from subreddits
-  // and do client-side title matching
+  // meme-api.com doesn't support search — only return title matches, never dump random memes
   const allMemes: Meme[] = [];
-  const q = query.toLowerCase();
+  const words = query.toLowerCase().split(/\s+/);
 
-  // Fetch a big batch from general meme subs
+  // Fetch from general meme subs
   const subs = ["memes", "dankmemes", "me_irl", "ProgrammerHumor", "wholesomememes", "shitposting", "AdviceAnimals"];
 
   const fetches = subs.map(async (sub) => {
@@ -117,16 +116,12 @@ export async function searchReddit(query: string, _after?: string): Promise<{ me
     if (r.status === "fulfilled") allMemes.push(...r.value);
   }
 
-  // Filter by query matching title or subreddit
-  const matched = allMemes.filter(
-    (m) =>
-      m.title.toLowerCase().includes(q) ||
-      (m.subreddit && m.subreddit.toLowerCase().includes(q))
-  );
+  // Only return actual matches — at least one search word must appear in title
+  const matched = allMemes.filter((m) => {
+    const title = m.title.toLowerCase();
+    return words.some((w) => title.includes(w));
+  });
 
-  // If no title matches, return all (search is best-effort since API doesn't support it)
-  const result = matched.length > 0 ? matched : allMemes;
-  result.sort((a, b) => (b.score || 0) - (a.score || 0));
-
-  return { memes: result, after: "more" };
+  matched.sort((a, b) => (b.score || 0) - (a.score || 0));
+  return { memes: matched, after: matched.length > 0 ? "more" : undefined };
 }
