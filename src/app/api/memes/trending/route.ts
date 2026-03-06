@@ -29,8 +29,9 @@ export async function GET(request: Request) {
     );
   }
 
-  // Only include Tenor GIFs on first page for "all", or always for "giphy" tab
-  if (source === "giphy" || (source === "all" && page === 0)) {
+  // Tenor GIFs ONLY when GIFs tab is explicitly selected — not in "all"
+  // Tenor trending is full of boomer "happy thursday" / "good morning" garbage
+  if (source === "giphy") {
     fetchers.push(
       fetchGiphyTrending(tenorPos).then((r) => {
         results.push(...r.memes);
@@ -39,7 +40,7 @@ export async function GET(request: Request) {
     );
   }
 
-  // Only include Imgflip on first page
+  // Imgflip templates on first page only
   if ((source === "all" || source === "imgflip") && page === 0) {
     fetchers.push(
       fetchImgflipTemplates().then((m) => {

@@ -52,7 +52,8 @@ export default function Home() {
           setMemes(m);
           setLoading(false);
           setCursors(data.cursors || {});
-          if (m.length < 10) setHasMore(false);
+          // Has more if we got cursors back
+          setHasMore(!!(data.cursors?.reddit_after || data.cursors?.tenor_pos));
         }
       })
       .catch((err) => {
@@ -66,41 +67,45 @@ export default function Home() {
   }, [source, activeQuery]);
 
   // Infinite scroll — load more with cursors
-  const loadMore = useCallback(() => {
+  const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     const nextPage = page + 1;
 
-    const params = new URLSearchParams({ source, page: String(nextPage) });
-    if (cursors.reddit_after) params.set("reddit_after", cursors.reddit_after);
-    if (cursors.tenor_pos) params.set("tenor_pos", cursors.tenor_pos);
+    try {
+      const params = new URLSearchParams({ source, page: String(nextPage) });
+      if (cursors.reddit_after) params.set("reddit_after", cursors.reddit_after);
+      if (cursors.tenor_pos) params.set("tenor_pos", cursors.tenor_pos);
 
-    const base = activeQuery
-      ? `/api/memes/search?q=${encodeURIComponent(activeQuery)}&${params}`
-      : `/api/memes/trending?${params}`;
+      const base = activeQuery
+        ? `/api/memes/search?q=${encodeURIComponent(activeQuery)}&${params}`
+        : `/api/memes/trending?${params}`;
 
-    fetch(base)
-      .then((res) => res.json())
-      .then((data) => {
-        const newMemes = data.memes || [];
-        if (newMemes.length === 0) {
+      const res = await fetch(base);
+      const data = await res.json();
+      const newMemes: Meme[] = data.memes || [];
+
+      if (newMemes.length === 0) {
+        setHasMore(false);
+      } else {
+        // Deduplicate against existing memes
+        setMemes((prev) => {
+          const ids = new Set(prev.map((m) => m.id));
+          const unique = newMemes.filter((m) => !ids.has(m.id));
+          return unique.length > 0 ? [...prev, ...unique] : prev;
+        });
+        setPage(nextPage);
+        setCursors(data.cursors || {});
+        // If no new cursor, we've exhausted this source
+        if (!data.cursors?.reddit_after && !data.cursors?.tenor_pos) {
           setHasMore(false);
-        } else {
-          setMemes((prev) => {
-            const ids = new Set(prev.map((m) => m.id));
-            const unique = newMemes.filter((m: Meme) => !ids.has(m.id));
-            if (unique.length === 0) {
-              setHasMore(false);
-              return prev;
-            }
-            return [...prev, ...unique];
-          });
-          setPage(nextPage);
-          setCursors(data.cursors || {});
         }
-      })
-      .catch(() => setHasMore(false))
-      .finally(() => setLoadingMore(false));
+      }
+    } catch {
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
   }, [loadingMore, hasMore, page, activeQuery, source, cursors]);
 
   // Intersection observer for infinite scroll
