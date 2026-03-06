@@ -1,30 +1,16 @@
-import https from "https";
 import { Meme } from "../types";
-
-function httpGet(url: string, timeoutMs = 8000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const req = https.get(
-      url,
-      { headers: { "User-Agent": "Mozilla/5.0 (compatible; MemeFinder/1.0)" } },
-      (res) => {
-        let data = "";
-        res.on("data", (chunk: Buffer) => (data += chunk.toString()));
-        res.on("end", () => resolve(data));
-        res.on("error", reject);
-      }
-    );
-    req.on("error", reject);
-    req.setTimeout(timeoutMs, () => {
-      req.destroy();
-      reject(new Error("timeout"));
-    });
-  });
-}
 
 async function fetchJson(url: string): Promise<Record<string, unknown> | null> {
   try {
-    const text = await httpGet(url);
-    return JSON.parse(text);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; MemeFinder/1.0)" },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    return await res.json();
   } catch {
     return null;
   }
